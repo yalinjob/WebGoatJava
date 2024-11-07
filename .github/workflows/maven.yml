@@ -1,4 +1,4 @@
-name: Webgoat CI Jfrog
+name: Webgoat CI Jfrog yalin
 on:
   workflow_dispatch:
   push:
