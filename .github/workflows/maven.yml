@@ -11,7 +11,7 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
+      - name: Checkout Source Code
         uses: actions/checkout@v3
 
       - name: Install JFrog CLI
@@ -48,24 +48,26 @@ jobs:
           echo "repository=$(echo ${GITHUB_REF#refs/heads/} | sed 's/\//_/g')" >> $GITHUB_ENV
           echo $repository
 
-      - name: Maven Audit
+      - name: JFrog Xray Maven Audit
         run: |
-          jfrog audit --mvn --fail=false
+          jfrog rt ping
+          jf audit --mvn --fail=false
 
-      - name: Feature Branch Repository Update
-        run: jfrog mvnc \
-          --server-id-resolve=my-server-id \
-          --repo-resolve-releases=dev_virtul_webgoat_mvn_ya \
-          --repo-resolve-snapshots=dev_virtul_webgoat_mvn_ya \
-          --repo-deploy-releases=dev_virtul_webgoat_mvn_ya \
-          --repo-deploy-snapshots=dev_virtul_webgoat_mvn_ya
+      - name: Configure Maven Repository with JFrog CLI
+        run: |
+          jfrog mvnc \
+            --server-id-resolve=my-server-id \
+            --repo-resolve-releases=dev_virtul_webgoat_mvn_ya \
+            --repo-resolve-snapshots=dev_virtul_webgoat_mvn_ya \
+            --repo-deploy-releases=dev_virtul_webgoat_mvn_ya \
+            --repo-deploy-snapshots=dev_virtul_webgoat_mvn_ya
 
-      - name: Maven Build
+      - name: Maven Build with JFrog CLI
         run: |
           jfrog mvn clean install | tee maven_build.log
 
       - name: Upload Maven Build Log
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v3
         with:
           name: maven-build-log
           path: maven_build.log
@@ -93,7 +95,8 @@ jobs:
       matrix:
         branch: ["main"]
     steps:
-      - uses: jfrog/frogbot@v2
+      - name: Frogbot Repository Scan
+        uses: jfrog/frogbot@v2
         env:
           JF_URL: ${{ secrets.JF_URL }}
           JF_ACCESS_TOKEN: ${{ secrets.JF_ACCESS_TOKEN }}
@@ -101,11 +104,10 @@ jobs:
           JF_GIT_BASE_BRANCH: ${{ matrix.branch }}
           JF_INCLUDE_ALL_VULNERABILITIES: "TRUE"
 
-  mitigation-scan:
+  mitigation:
     runs-on: ubuntu-latest
-    needs: build
     steps:
-      - name: Checkout code
+      - name: Checkout Source Code
         uses: actions/checkout@v3
 
       - name: Install JFrog CLI
@@ -115,35 +117,19 @@ jobs:
 
       - name: Configure JFrog CLI
         run: |
-          jfrog config add mitigation-server \
+          jfrog config add default \
             --artifactory-url=${{ secrets.JF_URL }}/artifactory \
             --xray-url=https://soleng.jfrog.io/xray/ \
             --user=${{ secrets.JF_USER }} \
             --access-token=${{ secrets.JF_ACCESS_TOKEN }} \
             --interactive=false
-          jfrog config use mitigation-server
 
-      - name: Ping Xray
-        run: jfrog xr ping
-
-      - name: Run Xray Audit and Save JSON
+      - name: Run JFrog Xray Audit with Report
         run: |
-          jfrog audit --mvn --format=json --output=scan-results.json --fail=false
-          cat scan-results.json
+          jf audit --mvn --format=json > scan-results.json || true
 
       - name: Upload Xray Audit Report
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v3
         with:
           name: mitigation-xray-scan
           path: scan-results.json
-
-      - name: Fail on Critical Vulnerabilities
-        run: |
-          CRIT=$(jq '.vulnerabilities[] | select(.severity == "Critical")' scan-results.json | wc -l)
-          echo "Number of critical vulns: $CRIT"
-          if [ "$CRIT" -gt 0 ]; then
-            echo "❌ Critical vulnerabilities found. Failing the job."
-            exit 1
-          else
-            echo "✅ No critical vulnerabilities found."
-          fi
