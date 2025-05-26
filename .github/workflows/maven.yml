@@ -1,141 +1,37 @@
-name: Webgoat CI Jfrog yalin
+name: "Frogbot Security Scan"
 
 on:
-  workflow_dispatch:
-  push:
+  pull_request_target: 
+    types: [opened, synchronize] # Triggers scan-pr flow for every opened/updated pull request
+  push: # Triggers scan-repo flow for every push to the specified branches
     branches:
       - main
-      - master
-      - dev
-  pull_request:
-    branches:
-      - main
-      - master
-      - dev
+  schedule:
+    - cron: "0 0 * * *"   # The repository will be scanned once a day at 00:00 GMT.
+  workflow_dispatch: # The repository will be scanned on demand
+
+permissions:
+  pull-requests: write
+  contents: write
+  security-events: write
+  # [Mandatory If using OIDC authentication protocol instead of JF_ACCESS_TOKEN]
+  # id-token: write
 
 jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout Source Code
-        uses: actions/checkout@v3
-
-      - name: Install JFrog CLI
-        uses: jfrog/setup-jfrog-cli@v4
-        with:
-          version: '2.56.1'
-
-      - name: Verify JFrog CLI Installation
-        run: jfrog -v
-
-      - name: Verify Maven and Java Installation
-        run: |
-          mvn -v
-          java -version
-
-      - name: Check DNS Resolution
-        run: nslookup soleng.jfrog.io
-
-      - name: Configure JFrog CLI
-        run: |
-          jfrog config add my-server-id \
-            --artifactory-url=${{ secrets.JF_URL }}/artifactory \
-            --xray-url=https://soleng.jfrog.io/xray/ \
-            --user=${{ secrets.JF_USER }} \
-            --access-token=${{ secrets.JF_ACCESS_TOKEN }} \
-            --interactive=false
-          jfrog config use my-server-id
-
-      - name: Ping Artifactory
-        run: jfrog rt ping
-
-      - name: Set Environment Variables
-        run: |
-          echo "repository=$(echo ${GITHUB_REF#refs/heads/} | sed 's/\//_/g')" >> $GITHUB_ENV
-          echo $repository
-
-      - name: JFrog Xray Maven Audit
-        run: |
-          jfrog rt ping
-          jf audit --mvn --fail=false
-
-      - name: Configure Maven Repository with JFrog CLI
-        run: |
-          jfrog mvnc \
-            --server-id-resolve=my-server-id \
-            --repo-resolve-releases=dev_virtul_webgoat_mvn_ya \
-            --repo-resolve-snapshots=dev_virtul_webgoat_mvn_ya \
-            --repo-deploy-releases=dev_virtul_webgoat_mvn_ya \
-            --repo-deploy-snapshots=dev_virtul_webgoat_mvn_ya
-
-      - name: Maven Build with JFrog CLI
-        run: |
-          jfrog mvn clean install | tee maven_build.log
-
-      - name: Upload Maven Build Log
-        uses: actions/upload-artifact@v3
-        with:
-          name: maven-build-log
-          path: maven_build.log
-
-      - name: Log in to JFrog Artifactory Docker Registry
-        run: docker login soleng.jfrog.io -u ${{ secrets.JF_USER }} --password "${{ secrets.JF_ACCESS_TOKEN }}"
-
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v2
-        with:
-          platforms: "linux/amd64,linux/arm64"
-
-      - name: Build and Push Docker Image
-        uses: docker/build-push-action@v5
-        id: build
-        with:
-          file: Dockerfile
-          push: true
-          platforms: linux/amd64
-          tags: soleng.jfrog.io/dev-ya-docker-webgoat-virtul/myappversion1:version1
-
-  scan-repository:
+  frogbot-scan:
     runs-on: ubuntu-latest
     strategy:
       matrix:
+        # The repository scanning will be triggered periodically on the following branches.
         branch: ["main"]
     steps:
-      - name: Frogbot Repository Scan
-        uses: jfrog/frogbot@v2
+      - uses: jfrog/frogbot@v2
+        # [Mandatory if using OIDC authentication protocol instead of JF_ACCESS_TOKEN]
+        # Insert to oidc-provider-name the 'Provider Name' defined in the OIDC integration configured in the JPD
+        # with:
+        #   oidc-provider-name: ""
         env:
           JF_URL: ${{ secrets.JF_URL }}
           JF_ACCESS_TOKEN: ${{ secrets.JF_ACCESS_TOKEN }}
           JF_GIT_TOKEN: ${{ secrets.JF_GIT_TOKEN }}
-          JF_GIT_BASE_BRANCH: ${{ matrix.branch }}
-          JF_INCLUDE_ALL_VULNERABILITIES: "TRUE"
-
-  mitigation:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout Source Code
-        uses: actions/checkout@v3
-
-      - name: Install JFrog CLI
-        uses: jfrog/setup-jfrog-cli@v4
-        with:
-          version: '2.56.1'
-
-      - name: Configure JFrog CLI
-        run: |
-          jfrog config add default \
-            --artifactory-url=${{ secrets.JF_URL }}/artifactory \
-            --xray-url=https://soleng.jfrog.io/xray/ \
-            --user=${{ secrets.JF_USER }} \
-            --access-token=${{ secrets.JF_ACCESS_TOKEN }} \
-            --interactive=false
-
-      - name: Run JFrog Xray Audit with Report
-        run: |
-          jf audit --mvn --format=json > scan-results.json || true
-
-      - name: Upload Xray Audit Report
-        uses: actions/upload-artifact@v3
-        with:
-          name: mitigation-xray-scan
-          path: scan-results.json
+          JF_GIT_BASE_BRANCH: ${{ matrix.branch }}    # For repository scan action
