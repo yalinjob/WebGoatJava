@@ -7,7 +7,7 @@ import java.io.ObjectInputStream;
 import java.io.Serializable;
 import java.time.LocalDateTime;
 import lombok.extern.slf4j.Slf4j;
-
+// TODO move back to lesson
 @Slf4j
 // TODO move back to lesson
 public class VulnerableTaskHolder implements Serializable {
@@ -17,7 +17,8 @@ public class VulnerableTaskHolder implements Serializable {
   private String taskName;
   private String taskAction;
   private LocalDateTime requestedExecutionTime;
-
+  // yalintesting 25/05 
+  
   public VulnerableTaskHolder(String taskName, String taskAction) {
     super();
     this.taskName = taskName;
